@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Run as {{ azdo_agent_user }} to register this agent. Needs two env vars:
+#   AZDO_URL   e.g. https://dev.azure.com/gonzalez
+#   AZDO_PAT   a PAT with Agent Pools (read, manage)
+set -euo pipefail
+cd "{{ azdo_agent_dir }}"
+: "${AZDO_URL:?set AZDO_URL}"
+: "${AZDO_PAT:?set AZDO_PAT}"
+./config.sh --unattended \
+  --url "$AZDO_URL" \
+  --auth pat --token "$AZDO_PAT" \
+  --pool "lab" \
+  --agent "$(hostname)" \
+  --acceptTeeEula
+sudo ./svc.sh install {{ azdo_agent_user }}
+sudo ./svc.sh start
+echo "Agent registered and running."

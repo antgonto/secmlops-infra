@@ -1,0 +1,29 @@
+# Rendered by Ansible. Admin password comes from the OpenBao-seeded value.
+hostname: harbor.{{ lab_domain }}
+http:
+  port: {{ harbor_http_port }}
+
+harbor_admin_password: "{{ harbor_admin_password }}"
+
+database:
+  password: "{{ harbor_db_password }}"
+  max_idle_conns: 100
+  max_open_conns: 900
+
+data_volume: {{ data_root }}/harbor
+
+trivy:
+  ignore_unfixed: false
+  skip_update: false
+
+jobservice:
+  max_job_workers: 10
+
+log:
+  level: info
+  local:
+    rotate_count: 50
+    rotate_size: 200M
+    location: /var/log/harbor
+
+_version: {{ harbor_version }}

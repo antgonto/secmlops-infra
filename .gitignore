@@ -1,0 +1,16 @@
+# Generated at provision time — never commit
+ansible/**/.lab-secrets.yml
+*.kubeconfig
+cosign.key
+cosign.pub
+CREDENTIALS.txt
+.vagrant/
+*.box
+tofu/.terraform/
+tofu/*.tfstate*
+iso/*
+!iso/README.md
+packer/windows11/output/
+packer/windows11/autounattend.xml
+packer/windows11/windows11.auto.pkrvars.hcl
+packer/**/packer_cache/

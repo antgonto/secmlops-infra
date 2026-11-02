@@ -1,0 +1,8 @@
+---
+- name: Map lab service hostnames to the VM in /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    line: "{{ lab_ip }} {{ item }}"
+    regexp: ".*{{ item | regex_escape }}$"
+    state: present
+  loop: "{{ service_hosts }}"

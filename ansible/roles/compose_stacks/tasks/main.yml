@@ -1,0 +1,39 @@
+---
+- name: Create per-stack directories
+  ansible.builtin.file:
+    path: "{{ stacks_root }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - core
+    - observability
+
+- name: Render the core compose file (MLflow, VersityGW S3, OpenBao, SecObserve)
+  ansible.builtin.template:
+    src: core-compose.yml.j2
+    dest: "{{ stacks_root }}/core/compose.yml"
+    mode: "0644"
+
+- name: Render the observability compose file (Prometheus, Grafana, Loki)
+  when: not (lite | bool)
+  ansible.builtin.template:
+    src: observability-compose.yml.j2
+    dest: "{{ stacks_root }}/observability/compose.yml"
+    mode: "0644"
+
+- name: Render Prometheus config
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ stacks_root }}/observability/prometheus.yml"
+    mode: "0644"
+
+- name: Bring up the core stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ stacks_root }}/core"
+    state: present
+
+- name: Bring up the observability stack
+  when: not (lite | bool)
+  community.docker.docker_compose_v2:
+    project_src: "{{ stacks_root }}/observability"
+    state: present

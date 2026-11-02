@@ -1,0 +1,158 @@
+---
+# Runs AFTER compose_stacks + harbor. Generates all secrets, seeds OpenBao,
+# and wires the services together so students start from a working state.
+
+- name: Install tooling used by bootstrap (cosign)
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "{{ item.dest }}"
+    mode: "0755"
+  loop:
+    - { url: "https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64", dest: /usr/local/bin/cosign }
+  failed_when: false
+
+# --- Cosign keypair (used by signing lessons + Kyverno verification) ---
+- name: Check for existing Cosign key
+  ansible.builtin.stat:
+    path: "{{ stacks_root }}/cosign.key"
+  register: cosign_key
+
+- name: Generate a Cosign keypair
+  ansible.builtin.shell:
+    cmd: cosign generate-key-pair
+    chdir: "{{ stacks_root }}"
+  environment:
+    COSIGN_PASSWORD: "{{ cosign_password }}"
+  when: not cosign_key.stat.exists
+  changed_when: true
+
+- name: Read the Cosign public key
+  ansible.builtin.slurp:
+    src: "{{ stacks_root }}/cosign.pub"
+  register: cosign_pub_raw
+
+- name: Expose the public key as a fact for the kyverno role
+  ansible.builtin.set_fact:
+    cosign_public_key: "{{ cosign_pub_raw.content | b64decode }}"
+
+# --- S3 buckets (VersityGW posix backend: a bucket is a top-level directory) ---
+- name: Create S3 buckets as directories on the gateway's data root
+  ansible.builtin.file:
+    path: "{{ data_root }}/s3/{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - mlflow     # MLflow artifact store
+    - ml-data    # DVC remote
+    - harbor     # optional Harbor blob storage
+
+- name: Verify the S3 gateway answers (403 = auth required = alive)
+  ansible.builtin.uri:
+    url: "http://localhost:7070/"
+    status_code: [200, 403]
+  register: s3_health
+  until: s3_health.status in [200, 403]
+  retries: 12
+  delay: 5
+
+# --- OpenBao seeding (the secrets the CI pipelines read) ---
+- name: Enable the KV engine in OpenBao
+  ansible.builtin.command:
+    cmd: bao secrets enable -path=secret kv-v2
+  environment:
+    BAO_ADDR: "http://localhost:8200"
+    BAO_TOKEN: "{{ bao_root_token }}"
+  register: kv_enable
+  changed_when: "'success' in kv_enable.stderr or 'Success' in kv_enable.stdout"
+  failed_when: false
+
+- name: Seed secrets into OpenBao
+  ansible.builtin.command:
+    cmd: >-
+      bao kv put secret/mlops/{{ item.path }} {{ item.kv }}
+  environment:
+    BAO_ADDR: "http://localhost:8200"
+    BAO_TOKEN: "{{ bao_root_token }}"
+  loop:
+    - { path: s3, kv: "access_key={{ s3_access_key }} secret_key={{ s3_secret_key }}" }
+    - { path: harbor, kv: "admin_password={{ harbor_admin_password }}" }
+    - { path: cosign, kv: "password={{ cosign_password }}" }
+    - { path: pomerium, kv: "shared_secret={{ pomerium_shared_secret }} cookie_secret={{ pomerium_cookie_secret }}" }
+    - { path: portal, kv: "secret_key={{ portal_secret_key }} db_password={{ portal_db_password }} email_host_user=courses@secmlops.com email_host_password=set-in-course-3-module-6" }
+    - { path: secobserve, kv: "url=http://secobserve.{{ lab_domain }}:8081 admin_password={{ secobserve_admin_password }} token=set-in-lab-13.1" }
+  loop_control:
+    label: "{{ item.path }}"
+  no_log: true
+  changed_when: true
+
+# --- OpenBao policies + JWT auth mounts (one per CI platform; the per-repo roles are created on Course 1 pages 6.2-6.4) ---
+- name: Policy directory
+  ansible.builtin.file: { path: "{{ stacks_root }}/openbao", state: directory, mode: "0700" }
+
+- name: OpenBao policies for CI
+  ansible.builtin.copy:
+    dest: "{{ stacks_root }}/openbao/policy-{{ item.name }}.hcl"
+    mode: "0600"
+    content: "{{ item.hcl }}"
+  loop:
+    - { name: ci-mlops, hcl: 'path "secret/data/mlops/s3" { capabilities = ["read"] }\npath "secret/data/mlops/secobserve" { capabilities = ["read"] }\n' }
+    - { name: ci-sign,  hcl: 'path "secret/data/mlops/cosign" { capabilities = ["read"] }\npath "secret/data/mlops/harbor" { capabilities = ["read"] }\npath "secret/data/mlops/portal" { capabilities = ["read"] }\n' }
+  loop_control: { label: "{{ item.name }}" }
+
+- name: Write OpenBao policies
+  ansible.builtin.command:
+    cmd: "bao policy write {{ item }} {{ stacks_root }}/openbao/policy-{{ item }}.hcl"
+  environment: { BAO_ADDR: "http://localhost:8200", BAO_TOKEN: "{{ bao_root_token }}" }
+  loop: [ci-mlops, ci-sign]
+  changed_when: true
+
+- name: Enable a JWT auth mount per CI platform
+  ansible.builtin.command:
+    cmd: "bao auth enable -path=jwt-{{ item.name }} jwt"
+  environment: { BAO_ADDR: "http://localhost:8200", BAO_TOKEN: "{{ bao_root_token }}" }
+  loop:
+    - { name: github, issuer: "https://token.actions.githubusercontent.com" }
+    - { name: gitlab, issuer: "https://gitlab.com" }
+    - { name: azure,  issuer: "https://login.microsoftonline.com/common/v2.0" }   # re-configured with the real tenant on page 6.4
+  loop_control: { label: "{{ item.name }}" }
+  register: jwt_enable
+  changed_when: "'Success' in jwt_enable.stdout"
+  failed_when: jwt_enable.rc != 0 and 'already in use' not in jwt_enable.stderr
+
+- name: Point each JWT mount at its issuer's OIDC discovery URL
+  ansible.builtin.command:
+    cmd: >-
+      bao write auth/jwt-{{ item.name }}/config oidc_discovery_url={{ item.issuer }} bound_issuer={{ item.issuer }}
+  environment: { BAO_ADDR: "http://localhost:8200", BAO_TOKEN: "{{ bao_root_token }}" }
+  loop:
+    - { name: github, issuer: "https://token.actions.githubusercontent.com" }
+    - { name: gitlab, issuer: "https://gitlab.com" }
+    - { name: azure,  issuer: "https://login.microsoftonline.com/common/v2.0" }
+  loop_control: { label: "{{ item.name }}" }
+  changed_when: true
+  failed_when: false          # needs internet to fetch the discovery doc; page 6.x re-runs it and verifies
+
+# --- Harbor project + robot account for CI ---
+- name: Create the mlops project in Harbor
+  ansible.builtin.uri:
+    url: "http://localhost:{{ harbor_http_port }}/api/v2.0/projects"
+    method: POST
+    user: admin
+    password: "{{ harbor_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      project_name: mlops
+      public: false
+      metadata:
+        auto_scan: "true"
+        prevent_vul: "true"
+        severity: high
+    status_code: [201, 409]
+  no_log: true
+
+- name: Write the generated credentials summary for the student
+  ansible.builtin.template:
+    src: credentials.txt.j2
+    dest: "{{ stacks_root }}/CREDENTIALS.txt"
+    mode: "0600"

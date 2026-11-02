@@ -1,0 +1,64 @@
+---
+# SecMLOps all-in-one VM provisioning — fully automated.
+
+# Play 1: generate lab secrets once and persist them (git-ignored), so every
+# later role and re-run reads the same values. Idempotent.
+- name: Generate and load lab secrets
+  hosts: lab
+  gather_facts: false
+  tasks:
+    - name: Ensure stacks root exists (for the secrets file)
+      ansible.builtin.file:
+        path: "{{ stacks_root }}"
+        state: directory
+        mode: "0700"
+
+    - name: Check for an existing secrets file
+      ansible.builtin.stat:
+        path: "{{ stacks_root }}/.lab-secrets.yml"
+      register: secrets_file
+
+    - name: Generate secrets on first run
+      ansible.builtin.copy:
+        dest: "{{ stacks_root }}/.lab-secrets.yml"
+        mode: "0600"
+        content: |
+          s3_access_key: s3admin
+          s3_secret_key: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}"
+          harbor_admin_password: "{{ lookup('password', '/dev/null length=20 chars=ascii_letters,digits') }}Aa1!"
+          harbor_db_password: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}"
+          bao_root_token: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+          cosign_password: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}"
+          grafana_admin_password: "{{ lookup('password', '/dev/null length=20 chars=ascii_letters,digits') }}"
+          pomerium_shared_secret: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+          pomerium_cookie_secret: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+          secobserve_admin_password: "{{ lookup('password', '/dev/null length=20 chars=ascii_letters,digits') }}"
+          portal_secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"
+          portal_db_password: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}"
+      when: not secrets_file.stat.exists
+
+    - name: Load the secrets for this run
+      ansible.builtin.include_vars:
+        file: "{{ stacks_root }}/.lab-secrets.yml"
+
+# Play 2: provision everything, in dependency order.
+- name: Provision the SecMLOps lab VM
+  hosts: lab
+  gather_facts: true
+  pre_tasks:
+    - name: Re-load generated secrets (available to all roles)
+      ansible.builtin.include_vars:
+        file: "{{ stacks_root }}/.lab-secrets.yml"
+  roles:
+    - role: common
+    - role: docker
+    - role: ci_tools        # complete scanner/CLI toolchain + GitLab/GitHub runner binaries
+    - role: hosts_entries
+    - role: compose_stacks
+    - role: k3s_clusters
+    - role: harbor
+    - role: bootstrap
+    - role: kyverno
+    - role: azdo_agent
+    - { role: hardening, when: production | bool }
+    - { role: backup,    when: production | bool }

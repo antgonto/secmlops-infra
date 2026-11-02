@@ -1,0 +1,56 @@
+---
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - git
+      - jq
+      - unzip
+      - python3-pip
+      - ufw
+    state: present
+
+- name: Enable UFW with default deny incoming
+  community.general.ufw:
+    state: enabled
+    policy: deny
+    direction: incoming
+  failed_when: false
+
+- name: Allow SSH through UFW
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+  failed_when: false
+
+- name: Ensure stacks and data roots exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ stacks_root }}"
+    - "{{ data_root }}"
+
+- name: Normalize line endings of shared scripts (protects Windows hosts that checked out with CRLF)
+  ansible.builtin.shell: |
+    apt-get install -y dos2unix >/dev/null && find /vagrant/scripts /vagrant/k3s -type f \( -name '*.sh' -o -name '*.yaml' \) -exec dos2unix -q {} +
+  changed_when: false
+  failed_when: false
+
+- name: Lab root directory
+  ansible.builtin.file: { path: /opt/secmlops, state: directory, mode: "0755" }
+
+- name: Record lab mode (read by smoke.sh and tools-check)
+  ansible.builtin.copy:
+    dest: /opt/secmlops/lite.flag
+    content: "lite: {{ 'true' if (lite | bool) else 'false' }}\n"
+    mode: "0644"

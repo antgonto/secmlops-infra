@@ -1,0 +1,50 @@
+---
+# Two single-node k3s "clusters" on one VM: the default systemd service for
+# staging, and a second instance on a different data-dir/port for production.
+- name: Install k3s (staging — default instance)
+  ansible.builtin.shell:
+    cmd: >-
+      curl -sfL https://get.k3s.io |
+      INSTALL_K3S_CHANNEL={{ k3s_channel }}
+      INSTALL_K3S_EXEC="server --https-listen-port {{ k3s_staging_api_port }}
+      --write-kubeconfig-mode 644 --node-name staging" sh -
+    creates: /usr/local/bin/k3s
+
+- name: Copy staging kubeconfig to a stable path
+  ansible.builtin.copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "{{ stacks_root }}/staging.kubeconfig"
+    remote_src: true
+    mode: "0644"
+  failed_when: false
+
+- name: Install k3s (production — second instance)
+  when: not (lite | bool)
+  ansible.builtin.shell:
+    cmd: >-
+      curl -sfL https://get.k3s.io |
+      INSTALL_K3S_CHANNEL={{ k3s_channel }}
+      INSTALL_K3S_NAME=prod
+      INSTALL_K3S_EXEC="server --https-listen-port {{ k3s_prod_api_port }}
+      --data-dir /var/lib/rancher/k3s-prod
+      --write-kubeconfig /etc/rancher/k3s/prod.yaml
+      --write-kubeconfig-mode 644 --node-name production" sh -
+    creates: /etc/systemd/system/k3s-prod.service
+
+- name: Copy prod kubeconfig to a stable path
+  ansible.builtin.copy:
+    src: /etc/rancher/k3s/prod.yaml
+    dest: "{{ stacks_root }}/prod.kubeconfig"
+    remote_src: true
+    mode: "0644"
+  failed_when: false
+
+- name: Create the apps and infra namespaces on staging
+  ansible.builtin.shell:
+    cmd: >-
+      k3s kubectl create namespace {{ item }} --dry-run=client -o yaml |
+      k3s kubectl apply -f -
+  loop:
+    - apps
+    - infra
+  changed_when: false

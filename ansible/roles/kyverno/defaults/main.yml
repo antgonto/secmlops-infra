@@ -1,0 +1,6 @@
+---
+kyverno_version: v1.12.5
+cosign_public_key: |
+  -----BEGIN PUBLIC KEY-----
+  PLACEHOLDER
+  -----END PUBLIC KEY-----

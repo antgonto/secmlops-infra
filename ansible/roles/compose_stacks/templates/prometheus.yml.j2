@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Pomerium / ingress metrics feed the attack-traffic alerts (lesson 13.1).
+  - job_name: pomerium
+    static_configs:
+      - targets: ["staging.{{ lab_domain }}:9090"]
+    honor_labels: true

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Register the GitLab runner. Needs: GL_URL (https://gitlab.com or your self-hosted URL) and GL_RUNNER_TOKEN
+# (project -> Settings -> CI/CD -> Runners -> New project runner -> tags: lab -> the token shown).
+set -euo pipefail
+: "${GL_URL:?}" ; : "${GL_RUNNER_TOKEN:?}"
+sudo gitlab-runner register --non-interactive --url "$GL_URL" --token "$GL_RUNNER_TOKEN" \
+  --executor docker --docker-image python:3.12 --docker-volumes /var/run/docker.sock:/var/run/docker.sock \
+  --docker-network-mode host --description "$(hostname)"
+sudo gitlab-runner start
+echo "GitLab runner registered (tag: lab, docker executor with host network so it reaches *.secmlops.com)"

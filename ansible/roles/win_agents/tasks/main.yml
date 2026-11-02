@@ -1,0 +1,34 @@
+---
+# Windows CI agents: Azure DevOps agent (Windows), GitHub runner (Windows), GitLab runner (Windows).
+# Binaries installed here; registration needs a token and is a separate make/lab.ps1 target (never stored).
+- name: Agent directories
+  ansible.windows.win_file: { path: "{{ item }}", state: directory }
+  loop: ['C:\agents\azdo', 'C:\actions-runner', 'C:\gitlab-runner']
+
+- name: Azure DevOps agent (Windows x64)
+  ansible.windows.win_get_url:
+    url: "https://download.agent.dev.azure.com/agent/{{ azdo_agent_version }}/vsts-agent-win-x64-{{ azdo_agent_version }}.zip"
+    dest: 'C:\agents\azdo\agent.zip'
+    force: false
+- name: Unpack Azure DevOps agent
+  community.windows.win_unzip: { src: 'C:\agents\azdo\agent.zip', dest: 'C:\agents\azdo', creates: 'C:\agents\azdo\config.cmd' }
+
+- name: GitHub Actions runner (Windows x64)
+  ansible.windows.win_get_url:
+    url: "https://github.com/actions/runner/releases/download/v{{ github_runner_version }}/actions-runner-win-x64-{{ github_runner_version }}.zip"
+    dest: 'C:\actions-runner\runner.zip'
+    force: false
+- name: Unpack GitHub runner
+  community.windows.win_unzip: { src: 'C:\actions-runner\runner.zip', dest: 'C:\actions-runner', creates: 'C:\actions-runner\config.cmd' }
+
+- name: GitLab runner (Windows x64)
+  ansible.windows.win_get_url:
+    url: "https://gitlab-runner-downloads.s3.amazonaws.com/latest/binaries/gitlab-runner-windows-amd64.exe"
+    dest: 'C:\gitlab-runner\gitlab-runner.exe'
+    force: false
+
+- name: Registration helpers
+  ansible.windows.win_template:
+    src: "{{ item }}.j2"
+    dest: "C:\\agents\\{{ item }}"
+  loop: [register-azdo.ps1, register-github.ps1, register-gitlab.ps1]

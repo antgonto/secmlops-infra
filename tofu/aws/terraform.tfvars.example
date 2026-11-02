@@ -1,0 +1,5 @@
+region         = "us-east-1"
+ssh_public_key = "ssh-ed25519 AAAA... you@laptop"
+allowed_cidr   = "203.0.113.0/24"
+repo_url       = "https://github.com/<you>/secmlops-infra.git"
+dns_zone       = "lab.secmlops.com"

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Register the GitHub self-hosted runner. Needs: GH_REPO_URL (https://github.com/<you>/secmlops-demo) and GH_RUNNER_TOKEN
+# (repo -> Settings -> Actions -> Runners -> New self-hosted runner -> the token shown; valid ~1 hour).
+set -euo pipefail
+: "${GH_REPO_URL:?}" ; : "${GH_RUNNER_TOKEN:?}"
+cd /opt/gh-runner
+sudo -u {{ runner_user }} ./config.sh --unattended --url "$GH_REPO_URL" --token "$GH_RUNNER_TOKEN" \
+  --name "$(hostname)" --labels lab,self-hosted --replace
+sudo ./svc.sh install {{ runner_user }} && sudo ./svc.sh start
+echo "GitHub runner registered with labels: lab, self-hosted"

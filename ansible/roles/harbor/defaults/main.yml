@@ -1,0 +1,6 @@
+---
+harbor_version: v2.11.1
+harbor_http_port: 8080
+# These are overridden by group_vars/all.yml (generated) and OpenBao seeding.
+harbor_admin_password: "Harbor12345"
+harbor_db_password: "changeit"

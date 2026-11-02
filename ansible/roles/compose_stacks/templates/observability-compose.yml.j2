@@ -1,0 +1,34 @@
+# Rendered by Ansible. Observability stack.
+name: secmlops-observability
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - "{{ stacks_root }}/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro"
+      - "{{ data_root }}/prometheus:/prometheus"
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:latest
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - "{{ data_root }}/loki:/loki"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    depends_on:
+      - prometheus
+      - loki
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "{{ grafana_admin_password }}"
+    ports:
+      - "3000:3000"
+    volumes:
+      - "{{ data_root }}/grafana:/var/lib/grafana"
+    restart: unless-stopped

@@ -1,0 +1,145 @@
+---
+# Installs the COMPLETE scanner/CLI toolchain every ci/*.sh needs on the runner host.
+# Everything is pinned (see defaults) and idempotent (creates:/stat guards).
+
+- name: Apt packages (nmap, build deps, python)
+  ansible.builtin.apt:
+    name: [nmap, libpcap-dev, python3-venv, python3-dev, build-essential, unzip, jq, git, curl, ca-certificates]
+    state: present
+    update_cache: true
+
+- name: Runner service account (shared by all three platforms' runners)
+  ansible.builtin.user: { name: "{{ runner_user }}", system: true, create_home: true, groups: docker, append: true }
+
+# ---------- single-binary tools from GitHub releases ----------
+- name: Download single-binary tools
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "/usr/local/bin/{{ item.name }}"
+    mode: "0755"
+  loop:
+    - { name: cosign,   url: "https://github.com/sigstore/cosign/releases/download/v{{ tool_versions.cosign }}/cosign-linux-{{ arch }}" }
+    - { name: kubectl,  url: "https://dl.k8s.io/release/v{{ tool_versions.kubectl }}/bin/linux/{{ arch }}/kubectl" }
+    - { name: hadolint, url: "https://github.com/hadolint/hadolint/releases/download/v{{ tool_versions.hadolint }}/hadolint-{{ arch_names.hadolint[arch] }}" }
+    - { name: yq,       url: "https://github.com/mikefarah/yq/releases/download/v{{ tool_versions.yq }}/yq_linux_{{ arch }}" }
+    - { name: opengrep, url: "https://github.com/opengrep/opengrep/releases/download/v{{ tool_versions.opengrep }}/opengrep_{{ arch_names.opengrep[arch] }}" }
+    - { name: kyverno,  url: "https://github.com/kyverno/kyverno/releases/download/v{{ tool_versions.kyverno_cli }}/kyverno-cli_v{{ tool_versions.kyverno_cli }}_{{ arch_names.kyverno[arch] }}.tar.gz" }
+  loop_control: { label: "{{ item.name }}" }
+  when: item.name != 'kyverno'
+
+# ---------- tarball tools ----------
+- name: Install tarball tools (trivy, gitleaks, syft, grype, helm, actionlint, nuclei, katana, kyverno, opentofu)
+  ansible.builtin.unarchive:
+    src: "{{ item.url }}"
+    dest: /usr/local/bin
+    remote_src: true
+    include: "{{ item.include | default(omit) }}"
+    extra_opts: "{{ item.extra | default(omit) }}"
+    creates: "/usr/local/bin/{{ item.bin }}"
+    mode: "0755"
+  loop:
+    - { bin: trivy,      url: "https://github.com/aquasecurity/trivy/releases/download/v{{ tool_versions.trivy }}/trivy_{{ tool_versions.trivy }}_{{ arch_names.trivy[arch] }}.tar.gz", include: [trivy] }
+    - { bin: gitleaks,   url: "https://github.com/gitleaks/gitleaks/releases/download/v{{ tool_versions.gitleaks }}/gitleaks_{{ tool_versions.gitleaks }}_{{ arch_names.gitleaks[arch] }}.tar.gz", include: [gitleaks] }
+    - { bin: syft,       url: "https://github.com/anchore/syft/releases/download/v{{ tool_versions.syft }}/syft_{{ tool_versions.syft }}_linux_{{ arch }}.tar.gz", include: [syft] }
+    - { bin: grype,      url: "https://github.com/anchore/grype/releases/download/v{{ tool_versions.grype }}/grype_{{ tool_versions.grype }}_linux_{{ arch }}.tar.gz", include: [grype] }
+    - { bin: helm,       url: "https://get.helm.sh/helm-v{{ tool_versions.helm }}-linux-{{ arch }}.tar.gz", include: ["linux-{{ arch }}/helm"], extra: [--strip-components=1] }
+    - { bin: actionlint, url: "https://github.com/rhysd/actionlint/releases/download/v{{ tool_versions.actionlint }}/actionlint_{{ tool_versions.actionlint }}_linux_{{ arch }}.tar.gz", include: [actionlint] }
+    - { bin: nuclei,     url: "https://github.com/projectdiscovery/nuclei/releases/download/v{{ tool_versions.nuclei }}/nuclei_{{ tool_versions.nuclei }}_linux_{{ arch }}.zip", include: [nuclei] }
+    - { bin: katana,     url: "https://github.com/projectdiscovery/katana/releases/download/v{{ tool_versions.katana }}/katana_{{ tool_versions.katana }}_linux_{{ arch }}.zip", include: [katana] }
+    - { bin: kyverno,    url: "https://github.com/kyverno/kyverno/releases/download/v{{ tool_versions.kyverno_cli }}/kyverno-cli_v{{ tool_versions.kyverno_cli }}_{{ arch_names.kyverno[arch] }}.tar.gz", include: [kyverno] }
+    - { bin: tofu,       url: "https://github.com/opentofu/opentofu/releases/download/v{{ tool_versions.opentofu }}/tofu_{{ tool_versions.opentofu }}_linux_{{ arch }}.zip", include: [tofu] }
+  loop_control: { label: "{{ item.bin }}" }
+
+- name: testssl.sh (git checkout; it is a script, not a binary)
+  ansible.builtin.git:
+    repo: https://github.com/testssl/testssl.sh
+    dest: /opt/testssl
+    version: v3.2.4
+    depth: 1
+- name: Symlink testssl.sh
+  ansible.builtin.file:
+    src: /opt/testssl/testssl.sh
+    dest: /usr/local/bin/testssl.sh
+    state: link
+
+- name: Nuclei templates (first update is large; do it at provision time, not in a job)
+  ansible.builtin.command: nuclei -update-templates -silent
+  args: { creates: /root/nuclei-templates }
+  changed_when: false
+  failed_when: false
+
+# ---------- Python toolchain (system-wide; jobs may also pip install their own requirements) ----------
+- name: Python tools
+  ansible.builtin.pip:
+    name: "{{ python_tools }}"
+    extra_args: --break-system-packages
+  register: pip_tools
+  failed_when: pip_tools.failed and 'garak' not in (pip_tools.msg | default(''))   # garak is optional (LLM labs)
+
+- name: Opengrep rules (open ruleset, cloned once)
+  ansible.builtin.git:
+    repo: https://github.com/opengrep/opengrep-rules
+    dest: /opt/opengrep-rules
+    depth: 1
+- name: Expose the rules path to all users
+  ansible.builtin.copy:
+    dest: /etc/profile.d/secmlops-tools.sh
+    mode: "0644"
+    content: |
+      export OPENGREP_RULES=/opt/opengrep-rules
+      export PATH=/usr/local/bin:$PATH
+      # Lab endpoints — the same names the labs use on the laptop (Prerequisites page), preset inside the VM
+      export HARBOR=harbor.secmlops.com:8080
+      export MLFLOW=http://mlflow.secmlops.com:5000
+      export S3_ENDPOINT=http://s3.secmlops.com:7070
+      export BAO_ADDR=http://bao.secmlops.com:8200
+      export SO_URL=http://secobserve.secmlops.com:8081
+      export STAGING=https://staging.secmlops.com
+      export PROD=https://apps.secmlops.com
+      export KUBECONFIG=/etc/rancher/k3s/k3s.yaml:/etc/rancher/k3s/prod.yaml
+
+# ---------- Azure CLI (Entra ID, ADO) ----------
+- name: Azure CLI
+  ansible.builtin.shell: curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+  args: { creates: /usr/bin/az }
+
+# ---------- container images the jobs run (pre-pull so first jobs don't time out) ----------
+- name: Pre-pull scanner images
+  community.docker.docker_image:
+    name: "{{ item }}"
+    source: pull
+  loop:
+    - ghcr.io/rapidast/rapidast:latest
+    - pomerium/pomerium:latest
+    - python:3.12-slim
+    - gcr.io/distroless/python3-debian12:nonroot
+  failed_when: false
+
+# ---------- CI runners for the other two platforms (binaries only; registration is manual — secrets) ----------
+- name: GitLab runner package
+  ansible.builtin.shell: |
+    curl -L "https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh" | bash
+    apt-get install -y gitlab-runner={{ tool_versions.gitlab_runner }}-1 || apt-get install -y gitlab-runner
+  args: { creates: /usr/bin/gitlab-runner }
+- name: GitHub runner directory
+  ansible.builtin.file: { path: /opt/gh-runner, state: directory, owner: "{{ runner_user }}", mode: "0755" }
+- name: GitHub runner tarball
+  ansible.builtin.unarchive:
+    src: "https://github.com/actions/runner/releases/download/v{{ tool_versions.github_runner }}/actions-runner-{{ arch_names.ghrunner[arch] }}-{{ tool_versions.github_runner }}.tar.gz"
+    dest: /opt/gh-runner
+    remote_src: true
+    owner: "{{ runner_user }}"
+    creates: /opt/gh-runner/config.sh
+
+- name: Runner registration helpers (operator runs these with the org URL + token)
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/opt/{{ item }}"
+    mode: "0755"
+  loop: [register-github-runner.sh, register-gitlab-runner.sh]
+
+- name: Tool verification script
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../scripts/tools-check.sh"
+    dest: /usr/local/bin/tools-check
+    mode: "0755"

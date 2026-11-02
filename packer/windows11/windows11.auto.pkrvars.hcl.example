@@ -1,0 +1,4 @@
+# Copy to windows11.auto.pkrvars.hcl (git-ignored) and fill in. Never commit the real file.
+iso_path     = "../../iso/Win11.iso"                 # your licensed Windows 11 ISO (see Course 1 module 4 for where to get it)
+iso_checksum = "sha256:REPLACE_WITH_HASH"            # sha256sum iso/Win11.iso   (Windows: Get-FileHash iso\Win11.iso)
+product_key  = "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"       # your key; or export PKR_VAR_product_key instead of writing it here

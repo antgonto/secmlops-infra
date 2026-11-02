@@ -1,0 +1,55 @@
+---
+# Developer + CI toolchain on Windows 11, via winget (built in) and Chocolatey (for anything winget lacks).
+- name: Rotate the build-time local admin password (the box shipped with the lab default)
+  ansible.windows.win_user:
+    name: vagrant
+    password: "{{ win_admin_password }}"
+    password_never_expires: true
+  when: win_admin_password is defined
+
+- name: Chocolatey
+  chocolatey.chocolatey.win_chocolatey:
+    name: chocolatey
+    state: present
+
+- name: Core tools
+  chocolatey.chocolatey.win_chocolatey:
+    name:
+      - git
+      - python312
+      - nodejs-lts
+      - jq
+      - 7zip
+      - vscode
+      - azure-cli
+      - kubernetes-cli
+      - kubernetes-helm
+      - cosign
+      - trivy
+      - gh
+      - glab
+      - gitleaks
+      - docker-cli
+    state: present
+
+- name: Git keeps LF line endings (scripts are shared with Linux)
+  ansible.windows.win_command: git config --system core.autocrlf false
+
+- name: Windows Defender exclusion for the runner work folders (avoids scan stalls on every checkout)
+  ansible.windows.win_shell: Add-MpPreference -ExclusionPath "C:\agents", "C:\actions-runner", "C:\gitlab-runner"
+  changed_when: false
+
+- name: Harden WinRM — switch from Basic/HTTP to HTTPS with a self-signed cert (lab) after first provision
+  ansible.windows.win_shell: |
+    $cert = New-SelfSignedCertificate -DnsName secmlops-win11 -CertStoreLocation Cert:\LocalMachine\My
+    winrm create winrm/config/Listener?Address=*+Transport=HTTPS ("@{Hostname=`"secmlops-win11`";CertificateThumbprint=`"" + $cert.Thumbprint + "`"}") 2>$null
+    netsh advfirewall firewall add rule name="WinRM HTTPS" dir=in action=allow protocol=TCP localport=5986 2>$null
+  args: { creates: 'C:\ProgramData\secmlops-winrm-https' }
+- name: Mark WinRM HTTPS done
+  ansible.windows.win_file: { path: 'C:\ProgramData\secmlops-winrm-https', state: touch }
+
+- name: Hosts entries for the lab services
+  community.windows.win_lineinfile:
+    path: C:\Windows\System32\drivers\etc\hosts
+    line: "192.168.56.20 harbor.secmlops.com mlflow.secmlops.com s3.secmlops.com bao.secmlops.com secobserve.secmlops.com grafana.secmlops.com staging.secmlops.com apps.secmlops.com course.secmlops.com course-staging.secmlops.com"
+    state: present

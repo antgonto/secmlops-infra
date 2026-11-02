@@ -1,0 +1,57 @@
+---
+# Lab hostnames — all resolve to the VM's own IP via /etc/hosts (hosts_entries role).
+lab_domain: secmlops.com
+lab_ip: "127.0.0.1"
+service_hosts:
+  - harbor.secmlops.com
+  - mlflow.secmlops.com
+  - s3.secmlops.com
+  - bao.secmlops.com
+  - secobserve.secmlops.com
+  - grafana.secmlops.com
+  - staging.secmlops.com
+  - apps.secmlops.com
+  - "course.{{ lab_domain }}"
+  - "course-staging.{{ lab_domain }}"
+
+# Where compose stacks and their data live inside the VM.
+stacks_root: /opt/secmlops
+data_root: /data/secmlops
+
+# k3s clusters (staging + prod) run as systemd services on the same host.
+k3s_channel: stable
+k3s_staging_api_port: 6443
+k3s_prod_api_port: 6444
+
+# Azure DevOps agent (installed; registration is one command post-provision).
+azdo_agent_version: "4.248.0"
+azdo_agent_user: azagent
+azdo_agent_dir: /opt/azagent
+
+# Versions for the automated installs.
+harbor_version: v2.11.1
+harbor_http_port: 8080
+kyverno_version: v1.12.5
+
+# Secrets: generated on first provision by the generate_secrets play and stored
+# in {{ stacks_root }}/.lab-secrets.yml (git-ignored), then loaded from there.
+# Defaults here are only fallbacks for a dry --syntax-check.
+s3_access_key: s3admin
+s3_secret_key: "changeit-s3"
+harbor_admin_password: "changeit-harbor"
+harbor_db_password: "changeit-harbordb"
+bao_root_token: "root"
+cosign_password: "changeit-cosign"
+grafana_admin_password: "changeit-grafana"
+
+# Windows 11 machine (optional)
+github_runner_version: "2.337.0"
+win_admin_password: "{{ lookup('env', 'SECMLOPS_WIN_ADMIN_PASSWORD') | default(omit, true) }}"
+
+# Production (tofu/azure sets production=true and allowed_cidr; laptop lab leaves them unset)
+production: false
+backup_root: /data/secmlops-backups
+backup_keep_days: 14
+
+# Lite mode (SECMLOPS_LITE=1): 8 GB laptops. Skips the production k3s cluster and the observability stack; everything else is identical.
+lite: false

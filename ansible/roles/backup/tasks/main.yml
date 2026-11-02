@@ -1,0 +1,11 @@
+---
+- name: Backup directory
+  ansible.builtin.file: { path: "{{ backup_root }}", state: directory, mode: "0700" }
+- name: Backup script
+  ansible.builtin.template: { src: secmlops-backup.sh.j2, dest: /usr/local/bin/secmlops-backup, mode: "0700" }
+- name: Nightly at 02:30
+  ansible.builtin.cron:
+    name: secmlops nightly backup
+    minute: "30"
+    hour: "2"
+    job: "/usr/local/bin/secmlops-backup >> /var/log/secmlops-backup.log 2>&1"

@@ -1,0 +1,50 @@
+# Admission gate for the apps namespace. Requires a valid Cosign signature,
+# an SBOM attestation, a digest-pinned Harbor image, and non-root execution.
+# Replace COSIGN_PUB with your public key before applying.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verified-mlops-images
+spec:
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: require-signature-and-sbom
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [apps]
+      verifyImages:
+        - imageReferences:
+            - "harbor.secmlops.com/mlops/*"
+          mutateDigest: true
+          required: true
+          attestors:
+            - entries:
+                - keys:
+                    publicKeys: |-
+                      -----BEGIN PUBLIC KEY-----
+                      REPLACE_WITH_COSIGN_PUB
+                      -----END PUBLIC KEY-----
+          attestations:
+            - type: https://cyclonedx.org/bom
+              conditions:
+                - all:
+                    - key: "{{ bomFormat }}"
+                      operator: Equals
+                      value: CycloneDX
+    - name: require-harbor-digest-and-nonroot
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [apps]
+      validate:
+        message: "Only digest-pinned Harbor images running as non-root are allowed."
+        pattern:
+          spec:
+            containers:
+              - image: "harbor.secmlops.com/*@sha256:*"
+                securityContext:
+                  runAsNonRoot: true

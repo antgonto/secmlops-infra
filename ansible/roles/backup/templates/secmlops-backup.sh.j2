@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Nightly backup of everything stateful: Postgres (MLflow, SecObserve), S3 objects, Harbor data, OpenBao (file storage), k3s etcd snapshots.
+set -euo pipefail
+TS=$(date +%F-%H%M); DEST={{ backup_root }}/$TS; mkdir -p "$DEST"
+docker exec core-mlflow-db-1 pg_dump -U mlflow mlflow | gzip > "$DEST/mlflow.sql.gz"
+docker exec core-secobserve-db-1 pg_dump -U secobserve secobserve | gzip > "$DEST/secobserve.sql.gz"
+tar czf "$DEST/s3.tgz" -C {{ data_root }} s3
+tar czf "$DEST/harbor.tgz" -C {{ data_root }} harbor
+tar czf "$DEST/openbao.tgz" -C {{ data_root }} openbao
+k3s etcd-snapshot save --name "lab-$TS" --dir "$DEST" >/dev/null 2>&1 || true
+KUBECONFIG=/etc/rancher/k3s/prod.yaml k3s etcd-snapshot save --name "prod-$TS" --dir "$DEST" >/dev/null 2>&1 || true
+cp /opt/secmlops/CREDENTIALS.txt "$DEST/" && chmod 600 "$DEST/CREDENTIALS.txt"
+find {{ backup_root }} -maxdepth 1 -mtime +{{ backup_keep_days }} -type d -exec rm -rf {} +
+echo "backup complete: $DEST ($(du -sh "$DEST" | cut -f1))"

@@ -1,0 +1,5 @@
+param([Parameter(Mandatory)][string]$Token, [string]$Url = "https://gitlab.com")
+Set-Location C:\gitlab-runner
+.\gitlab-runner.exe register --non-interactive --url $Url --token $Token --executor shell --shell pwsh --description $env:COMPUTERNAME
+.\gitlab-runner.exe install; .\gitlab-runner.exe start
+Write-Host "GitLab Windows runner registered (tag lab-windows, pwsh shell executor, service)."

@@ -1,0 +1,4 @@
+param([Parameter(Mandatory)][string]$RepoUrl, [Parameter(Mandatory)][string]$Token)
+Set-Location C:\actions-runner
+.\config.cmd --unattended --url $RepoUrl --token $Token --name $env:COMPUTERNAME --labels lab-windows,self-hosted --runasservice --replace
+Write-Host "GitHub Windows runner registered with labels lab-windows, self-hosted (service)."

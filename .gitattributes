@@ -1,0 +1,5 @@
+# Shell scripts, YAML and templates must keep LF line endings on every OS, or they break inside the Linux VM.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.tar.gz binary

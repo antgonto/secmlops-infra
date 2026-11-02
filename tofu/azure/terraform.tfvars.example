@@ -1,0 +1,4 @@
+location       = "eastus"
+ssh_public_key = "ssh-ed25519 AAAA... you@laptop"
+allowed_cidr   = "203.0.113.0/24"          # your egress IP(s) — never 0.0.0.0/0
+repo_url       = "https://github.com/<you>/secmlops-infra.git"

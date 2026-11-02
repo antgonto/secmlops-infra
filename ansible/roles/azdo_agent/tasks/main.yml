@@ -1,0 +1,43 @@
+---
+# Installs the agent binaries only. Registration needs an org URL + PAT, which
+# are secrets, so that step is manual — see the runbook. This keeps secrets out
+# of the image.
+- name: Create the agent service account
+  ansible.builtin.user:
+    name: "{{ azdo_agent_user }}"
+    system: true
+    create_home: true
+    groups: docker
+    append: true
+
+- name: Create the agent directory
+  ansible.builtin.file:
+    path: "{{ azdo_agent_dir }}"
+    state: directory
+    owner: "{{ azdo_agent_user }}"
+    mode: "0755"
+
+- name: Download the Azure DevOps agent
+  ansible.builtin.get_url:
+    url: >-
+      https://download.agent.dev.azure.com/agent/{{ azdo_agent_version }}/vsts-agent-linux-{{ "arm64" if ansible_architecture in ["aarch64","arm64"] else "x64" }}-{{ azdo_agent_version }}.tar.gz
+    dest: "{{ azdo_agent_dir }}/agent.tar.gz"
+    owner: "{{ azdo_agent_user }}"
+    mode: "0644"
+  failed_when: false
+
+- name: Unpack the agent
+  ansible.builtin.unarchive:
+    src: "{{ azdo_agent_dir }}/agent.tar.gz"
+    dest: "{{ azdo_agent_dir }}"
+    remote_src: true
+    owner: "{{ azdo_agent_user }}"
+    creates: "{{ azdo_agent_dir }}/config.sh"
+  failed_when: false
+
+- name: Drop a registration helper the operator runs manually
+  ansible.builtin.template:
+    src: register-agent.sh.j2
+    dest: "{{ azdo_agent_dir }}/register-agent.sh"
+    owner: "{{ azdo_agent_user }}"
+    mode: "0750"

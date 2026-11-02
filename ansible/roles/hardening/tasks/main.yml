@@ -1,0 +1,78 @@
+---
+# Production hardening for the lab host. Applied when `production: true` (Azure) — harmless on the laptop too.
+- name: Unattended security updates
+  ansible.builtin.apt:
+    name: [unattended-upgrades, fail2ban, auditd]
+    state: present
+- name: Enable unattended upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+    mode: "0644"
+
+- name: SSH — keys only, no root, no forwarding
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "^#?{{ item.key }} "
+    line: "{{ item.key }} {{ item.value }}"
+  loop:
+    - { key: PasswordAuthentication, value: "no" }
+    - { key: PermitRootLogin, value: "no" }
+    - { key: X11Forwarding, value: "no" }
+    - { key: MaxAuthTries, value: "3" }
+    - { key: ClientAliveInterval, value: "300" }
+  notify: restart sshd
+
+- name: fail2ban for sshd
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.local
+    content: |
+      [sshd]
+      enabled = true
+      maxretry = 5
+      bantime = 1h
+    mode: "0644"
+  notify: restart fail2ban
+
+- name: Host firewall — default deny inbound; only lab ports, and only from the allowed CIDR in production
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+    src: "{{ allowed_cidr | default('any') }}"
+  loop: ["22", "3000", "5000", "7070", "8080", "8081", "8200", "6443", "6444"]
+- name: Host firewall — the course portal (80/443) is public; it has its own authentication (Course 3)
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: ["80", "443"]
+- name: ufw default deny + enable
+  community.general.ufw:
+    state: enabled
+    policy: deny
+    direction: incoming
+
+- name: Docker daemon — no metrics/API on the network, log rotation
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: |
+      { "log-driver": "json-file", "log-opts": { "max-size": "50m", "max-file": "5" },
+        "insecure-registries": ["harbor.secmlops.com:8080"], "live-restore": true }
+    mode: "0644"
+  notify: restart docker
+
+- name: Kernel/network sysctls
+  ansible.posix.sysctl:
+    name: "{{ item.k }}"
+    value: "{{ item.v }}"
+    sysctl_set: true
+  loop:
+    - { k: net.ipv4.conf.all.rp_filter, v: "1" }
+    - { k: net.ipv4.tcp_syncookies, v: "1" }
+    - { k: kernel.kptr_restrict, v: "2" }
+    - { k: fs.protected_hardlinks, v: "1" }
+    - { k: fs.protected_symlinks, v: "1" }

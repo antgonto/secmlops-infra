@@ -1,0 +1,4 @@
+param([Parameter(Mandatory)][string]$Url, [Parameter(Mandatory)][string]$Pat, [string]$Pool = "lab-windows")
+Set-Location C:\agents\azdo
+.\config.cmd --unattended --url $Url --auth pat --token $Pat --pool $Pool --agent $env:COMPUTERNAME --runAsService --replace
+Write-Host "Azure DevOps Windows agent registered in pool $Pool (runs as a service)."

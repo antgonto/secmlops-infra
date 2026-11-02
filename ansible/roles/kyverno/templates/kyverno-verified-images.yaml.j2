@@ -1,0 +1,46 @@
+# Rendered by Ansible with the generated Cosign public key.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verified-mlops-images
+spec:
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: require-signature-and-sbom
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [apps]
+      verifyImages:
+        - imageReferences:
+            - "harbor.{{ lab_domain }}:{{ harbor_port | default(8080) }}/mlops/*"
+          mutateDigest: true
+          required: true
+          attestors:
+            - entries:
+                - keys:
+                    publicKeys: |-
+{{ cosign_public_key | indent(22, true) }}
+          attestations:
+            - type: https://cyclonedx.org/bom
+              conditions:
+                - all:
+                    - key: "{{ '{{' }} bomFormat {{ '}}' }}"
+                      operator: Equals
+                      value: CycloneDX
+    - name: require-harbor-digest-and-nonroot
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: [apps]
+      validate:
+        message: "Only digest-pinned Harbor images running as non-root are allowed."
+        pattern:
+          spec:
+            containers:
+              - image: "harbor.{{ lab_domain }}:{{ harbor_port | default(8080) }}/*@sha256:*"
+                securityContext:
+                  runAsNonRoot: true

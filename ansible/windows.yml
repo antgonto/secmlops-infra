@@ -1,0 +1,9 @@
+---
+# Configure the Windows 11 VM from the Ubuntu lab VM over WinRM.   make provision-win   /   .\lab.ps1 provision-win
+# Requires: ansible.windows + chocolatey.chocolatey collections (installed by ansible/requirements.yml) and pywinrm on the controller.
+- name: Windows 11 lab machine
+  hosts: windows
+  gather_facts: true
+  roles:
+    - win_tools
+    - win_agents
